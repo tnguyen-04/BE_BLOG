@@ -1,7 +1,9 @@
 import Post from "../models/postModel.js"
 import User from "../models/userModel.js"
-import { clerkClient } from "@clerk/express"
 import ImageKit from "imagekit"
+
+
+
 export const createPost = async (req, res) => {
     const clerkUserId = req.auth().userId
     console.log("headers", req.headers)
@@ -33,12 +35,21 @@ export const createPost = async (req, res) => {
     res.status(201).json(newPost)
 }
 export const getAllPosts = async (req, res) => {
+
+    const page = parseInt(req.query.page) || 1
+    const limit = parseInt(req.query.limit) || 5
+    const skip = (page - 1) * limit
+
     const posts = await Post.find()
-    res.status(200).json(posts)
+        .populate('user', 'username')
+        .skip(skip).limit(limit)
+    const totalPosts = await Post.countDocuments()
+    const hasNextPage = totalPosts > page * limit
+    res.status(200).json({ posts, hasNextPage })
 }
 export const getPostBySlug = async (req, res) => {
     const { slug } = req.params
-    const post = await Post.findOne({ slug })
+    const post = await Post.findOne({ slug }).populate('user', 'username img')
     res.status(200).json(post)
 }
 export const deletePost = async (req, res) => {
@@ -48,6 +59,12 @@ export const deletePost = async (req, res) => {
             message: "Unauthorized"
         })
     }
+    const role = req.auth.sessionClaims.metadata.role || 'user'
+    if (role === 'admin') {
+        await Post.findByIdAndDelete(req.params.id)
+        return res.status(200).json({ message: "Post deleted successfully" })
+    }
+
     const user = await User.findOne({ clerkUserId })
     const deletedPost = await Post.findByIdAndDelete({ _id: req.params.id, user: user._id })
     if (!deletedPost) {
@@ -70,4 +87,28 @@ export const uploadAuth = async (req, res) => {
 
     const { signature, expire, token } = await imageKit.getAuthenticationParameters()
     res.send({ signature, expire, token, publicKey: process.env.IMAGE_KIT_PUBLIC_KEY })
+}
+export const featurePost = async (req, res) => {
+    const clerkUserId = req.auth().userId
+    const postId = req.body.postId
+    if (!clerkUserId) {
+        return res.status(401).json({
+            message: "Unauthorized"
+        })
+    }
+    const role = req.auth.sessionClaims.metadata.role || 'user'
+    if (role !== 'admin') {
+        return res.status(403).json({
+            message: "You are not authorized to feature this post"
+        })
+    }
+    const post = await Post.findById(postId)
+    if (!post) {
+        return res.status(404).json({
+            message: "Post not found"
+        })
+    }
+    const isFeatured = post.isFeatured
+    const updatedPost = await Post.findByIdAndUpdate(postId, { isFeatured: !isFeatured }, { new: true })
+    res.status(200).json(updatedPost)
 }
