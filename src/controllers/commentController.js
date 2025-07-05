@@ -14,7 +14,8 @@ export const createComment = async (req, res) => {
 
 export const getPostComments = async (req, res) => {
     const { postId } = req.params
-    const comments = await Comment.find({ postId }).populate('user', 'username img').sort({ createdAt: -1 })
+    console.log('postIdCommentBE', postId)
+    const comments = await Comment.find({ post: postId }).populate('user', 'username img').sort({ createdAt: -1 })
     res.status(200).json(comments)
 }
 export const deleteComment = async (req, res) => {

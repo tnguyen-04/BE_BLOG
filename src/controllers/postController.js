@@ -6,11 +6,8 @@ import ImageKit from "imagekit"
 
 export const createPost = async (req, res) => {
     const clerkUserId = req.auth().userId
-    console.log("headers", req.headers)
 
-    console.log('auth', req.auth())
 
-    console.log('clerkUserId', clerkUserId)
     if (!clerkUserId) {
         return res.status(401).json({
             message: "Unauthorized"
@@ -22,10 +19,15 @@ export const createPost = async (req, res) => {
             message: "User not found"
         })
     }
-    let slug = req.body.title.toLowerCase().replace(/ /g, '-')
+    let slug = req.body.title.toLowerCase()
+        .replace(/ /g, '-')
+        .replace(/[^a-z0-9-]/g, '') // Loại bỏ tất cả ký tự đặc biệt trừ chữ cái, số và dấu gạch ngang
+        .replace(/-+/g, '-') // Thay thế nhiều dấu gạch ngang liên tiếp bằng một dấu gạch ngang
+        .replace(/^-|-$/g, '') // Loại bỏ dấu gạch ngang ở đầu và cuối
     let existingPost = await Post.findOne({ slug })
     let count = 2
     while (existingPost) {
+        ``
         slug = `${slug}-${count}`
         existingPost = await Post.findOne({ slug })
         count++
@@ -40,10 +42,58 @@ export const getAllPosts = async (req, res) => {
     const limit = parseInt(req.query.limit) || 5
     const skip = (page - 1) * limit
 
-    const posts = await Post.find()
-        .populate('user', 'username')
+    const query = {}
+    const category = req.query.cat
+    const searchQuery = req.query.search
+    const isFeatured = req.query.featured
+    const sortQuery = req.query.sort
+    const author = req.query.author
+    if (category) {
+        query.category = category
+    }
+    if (searchQuery) {
+        query.title = { $regex: searchQuery, $options: 'i' }
+    }
+    if (author) {
+        const user = await User.findOne({ username: author }).select('_id')
+        if (!user) {
+            return res.status(404).json({
+                message: "Post not found"
+            })
+        }
+        query.user = user._id
+    }
+
+    let sortObject = { createdAt: -1 }
+    if (sortQuery) {
+        switch (sortQuery) {
+            case 'newest':
+                sortObject = { createdAt: -1 }
+                break
+            case 'oldest':
+                sortObject = { createdAt: 1 }
+                break
+            case 'popular':
+                sortObject = { views: -1 }
+                break
+            case 'trending':
+                sortObject = { views: -1 }
+                query.createdAt = {
+                    $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+                }
+                break
+            default:
+                break
+        }
+
+    }
+    if (isFeatured) {
+        query.isFeatured = true
+    }
+    const posts = await Post.find(query)
+        .populate('user', 'username').sort(sortObject)
         .skip(skip).limit(limit)
-    const totalPosts = await Post.countDocuments()
+    const totalPosts = await Post.countDocuments(query)
     const hasNextPage = totalPosts > page * limit
     res.status(200).json({ posts, hasNextPage })
 }
